@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import os
 
 #Install library yt-dlp for youtube video download functionality
 
@@ -40,9 +41,83 @@ except subprocess.CalledProcessError as e:
 except Exception as e:
     print(f"Unexpected error: {e}")
 
-import os
-import subprocess
 import whisper
+import yt_dlp
+import re
+
+def download_youtube_transcript(video_url, output_path="downloads"):
+    """
+    Tries to download a YouTube transcript (official or auto-generated) using yt-dlp.
+    If successful, converts it to a .txt file and returns its path.
+    """
+    try:
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        # We'll download subtitles (including auto) without the video
+        # Then parse them into plain text.
+        ydl_opts = {
+            'writesubtitles': True,       # Attempt to write subtitles
+            'writeautomaticsub': True,    # Include auto-generated subtitles if official ones aren't available
+            'subtitleslangs': ['en'],     # Subtitles language
+            'subtitlesformat': 'vtt',     # We'll parse .vtt
+            'skip_download': True,        # Skip the actual video download
+            'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s')
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Setting download=True actually writes the subtitles to disk, 
+            # even though skip_download is True for the video.
+            info = ydl.extract_info(video_url, download=True)
+
+            base_filename = ydl.prepare_filename(info)
+            directory = os.path.dirname(base_filename) or output_path
+
+            # Check for .en.vtt in the directory
+            found_subtitles = [
+                os.path.join(directory, f)
+                for f in os.listdir(directory)
+                if f.endswith('.en.vtt')
+            ]
+            if not found_subtitles:
+                # No .en.vtt => no official or auto subtitles in English
+                return None
+
+            vtt_path = found_subtitles[0]
+            stem, _ = os.path.splitext(vtt_path)
+            transcript_file = stem + '_transcript.txt'
+
+            # Parse VTT -> text, removing <...> tags and skipping lines 
+            # that look like metadata or timestamps
+            with open(vtt_path, 'r', encoding='utf-8') as fin, open(transcript_file, 'w', encoding='utf-8') as fout:
+                for line in fin:
+                    line_stripped = line.strip()
+                    # Skip lines with 'WEBVTT', numeric counters, timestamps, or known metadata
+                    if (line_stripped.startswith('WEBVTT') or
+                        line_stripped.isdigit() or
+                        '-->' in line_stripped or
+                        not line_stripped or
+                        line_stripped.startswith('Kind:') or
+                        line_stripped.startswith('Language:')):
+                        continue
+
+                    # Remove inline tags like <00:00:00.160> or <c> using regex
+                    line_stripped = re.sub(r'<[^>]*>', '', line_stripped).strip()
+
+                    # If there's still text left, write it
+                    if line_stripped:
+                        fout.write(line_stripped + '\n')
+
+            print(f"Transcript downloaded and saved to: {transcript_file}")
+            return transcript_file
+
+    except Exception as e:
+        print(f"Error while downloading transcript: {e}")
+        return None
+
+
+
+
 
 def download_youtube_video_and_audio(video_url, output_path="downloads"):
     """
@@ -110,7 +185,6 @@ def download_youtube_video_and_audio(video_url, output_path="downloads"):
         print(f"Unexpected error: {e}")
         raise
 
-
 def transcribe_audio(file_path):
     """
     Transcribes an audio file using OpenAI's Whisper model.
@@ -139,15 +213,19 @@ def transcribe_audio(file_path):
         print(f"Error during transcription: {e}")
         raise
 
-
 def process_youtube_link(video_url, output_path="downloads"):
     """
-    Orchestrates the download of video/audio and transcribes the audio.
-    Returns the path to the saved transcription file.
+    Attempts to download the YouTube transcript (official or auto-generated). If found,
+    saves it in plain text and returns its path. Otherwise, downloads video + audio
+    and transcribes the audio with Whisper.
     """
-    # Download both video and audio
-    video_file, audio_file = download_youtube_video_and_audio(video_url, output_path)
+    transcript_file = download_youtube_transcript(video_url, output_path)
+    if transcript_file:
+        # We got a transcript file, so return it.
+        return transcript_file
 
+    # If no transcript found, do the manual approach.
+    video_file, audio_file = download_youtube_video_and_audio(video_url, output_path)
     # Transcribe the audio
     transcription = transcribe_audio(audio_file)
 

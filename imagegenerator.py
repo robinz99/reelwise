@@ -1,4 +1,4 @@
-    def __init__(self, short_type: str, background_video_name: str, background_music_name: str, voiceModule: VoiceModule, short_id="",
+def __init__(self, short_type: str, background_video_name: str, background_music_name: str, voiceModule: VoiceModule, short_id="",
                  num_images=None, watermark=None, language: Language = Language.ENGLISH,):
         super().__init__(short_id, short_type, language, voiceModule)
         if not short_id:
