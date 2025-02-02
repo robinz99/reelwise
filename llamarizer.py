@@ -116,7 +116,7 @@ class LLaMarizer:
                     "You're an expert video script writer specializing in educational content. Your task is to "
                     "create engaging and concise text scripts for Instagram Reels that explain complex topics "
                     "in a simple, clear manner. The user will provide a transcript of an educational lecture or "
-                    "material. From this transcript, you will extract the key concepts and create one short, "
+                    "material. Be aware that the transcript is imperfect, there will be mistakes in it. From this transcript, you will extract the key concepts and create one short, "
                     "engaging script. The script should be written with an educational tone, conversational style, "
                     "and suitable for a short video. It must end in a complete sentence, ensuring there are no "
                     "unfinished or incomplete thoughts. Your output must be only the script as a single string - "

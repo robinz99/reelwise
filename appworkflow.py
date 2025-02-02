@@ -3,6 +3,8 @@ from imagescraper import ImageScraper
 from ytdownloader import process_youtube_link
 from TextToSpeechTransformer import TextToSpeechTransformer
 from moviecutter import MovieCutter
+from Cloud_Uploader import CloudUploader
+from reelPublisher import ReelPublisher
 
 class Engine:
     def __init__(self, video_url: str, output_path: str = "downloads"):
@@ -10,6 +12,7 @@ class Engine:
         self.output_path = output_path
         self.llamarizer = LLaMarizer(use_cuda=False)
         self.scraper = ImageScraper(save_folder="images")
+        self.cloudUploader = CloudUploader()
         self.transformer = TextToSpeechTransformer()
         self.transcription_file = None
         self.script_text = None
@@ -17,6 +20,11 @@ class Engine:
         self.bing_terms = None
         self.image_paths = None
         self.voiceover_paths = None
+        self.reelPublisher = ReelPublisher(
+            access_token="",
+            instagram_user_id="17841472197943184",
+            caption="Reelwise AI generated Educational Summary"
+            )
 
     def process_video(self):
         try:
@@ -50,8 +58,24 @@ class Engine:
 
             #Combine all components into one video
             movie = MovieCutter(self.processed_script, self.voiceover_paths, self.image_paths)
-            output_path = movie.create_video()
-            print(f"Video created at: {output_path}")
+            video_path = movie.create_video()
+            print(f"Video created at: {video_path}")
+
+            #Upload the video to a webhosting service
+            video_url = self.cloudUploader.upload_to_cloudinary(video_path)
+
+            if video_url:
+                print(f"Cloud upload successful. Use this URL for Instagram: {video_url}")
+            else:
+                print("Cloudinary upload failed.")
+
+            #Upload the video from the URL to Instagram
+            container_id = self.reelPublisher.upload_reel_to_instagram(video_url)
+
+            if container_id and self.reelPublisher.check_media_status(container_id):
+                self.reelPublisher.publish_reel(container_id)
+            else:
+                print("Failed to upload or process Reel.")
 
             return True
 
