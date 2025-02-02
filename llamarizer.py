@@ -8,6 +8,8 @@
 
 import torch
 import json
+import time
+import re
 
 from transformers import (
     AutoModelForCausalLM,
@@ -100,38 +102,6 @@ class LLaMarizer:
             device_map=self.device_map,
         )
 
-    def extract_key_concepts(self, transcript):
-        """
-        Extract key concepts from the given transcript using a system message
-        and a user message. Returns the full pipeline output.
-        """
-        pipe = self._create_pipeline()
-
-        messages_concepts = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert in summarizing educational content. Your task is to extract key concepts or keywords from the provided "
-                    "transcript of an educational lecture. Focus only on the most important and relevant ideas, terms, or phrases that are "
-                    "essential to understanding the content. Do not generate a script or summary, only output a list of key concepts identified "
-                    "from the transcript. Your output should be strictly a JSON array of the key concepts, without any extra commentary or explanation. "
-                    "The key concepts should be terms or phrases that capture the essence of the lecture."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Here is the transcript of the lecture: [{transcript}]",
-            },
-        ]
-
-        outputs_concepts = pipe(
-            messages_concepts,
-            max_new_tokens=64,
-            do_sample=True
-        )
-
-        return outputs_concepts
-
     def generate_script(self, transcript):
         """
         Generate a short educational video script (JSON format) from the given transcript.
@@ -143,15 +113,20 @@ class LLaMarizer:
             {
                 "role": "system",
                 "content": (
-                    "You are an expert video script writer specializing in educational content. "
-                    "Your task is to create engaging and concise video scripts that explain complex topics in a simple and clear manner. "
-                    "The user will provide a transcript of an educational lecture or material. "
-                    "From this transcript, you will extract key concepts or keywords and generate a short, engaging script that explains these key ideas in a compelling way. "
-                    "You ONLY produce text for the script, written with an educational tone and in a conversational and accessible style suitable for a short video. "
-                    "Do not reference the video footage, audio, or other non-narrative elements in your response. "
-                    "Your script must not exceed 200 words. Focus on clarity, brevity, and engagement. "
-                    "Output your response in a strictly parsable JSON format, with the script under the key 'script'. "
-                    "For example: {\"script\": \"Did you know that ... ?\"}"
+                    "You're an expert video script writer specializing in educational content. Your task is to "
+                    "create engaging and concise text scripts for Instagram Reels that explain complex topics "
+                    "in a simple, clear manner. The user will provide a transcript of an educational lecture or "
+                    "material. From this transcript, you will extract the key concepts and create one short, "
+                    "engaging script. The script should be written with an educational tone, conversational style, "
+                    "and suitable for a short video. It must end in a complete sentence, ensuring there are no "
+                    "unfinished or incomplete thoughts. Your output must be only the script as a single string - "
+                    "no JSON, no commentary, and no additional formatting. Do not include any timestamps, it should "
+                    "be in the style of a transcript, ready to be read by one narrator. You ONLY produce text that "
+                    "will be read by a voice actor for a video. The user will give you the description of the video "
+                    "they want you to make and from that, you will write the script. Make sure to directly write "
+                    "the script in response to the lecture transcript provided by the user. Only include the text that will be narrated by the "
+                    "voice actor. You will produce purely text, with no other textual elements than the script itself."
+                    "Keep your answer concise and short, with a maximum of 100 words."
                 ),
             },
             {
@@ -162,28 +137,20 @@ class LLaMarizer:
 
         outputs_script = pipe(
             messages_script,
-            max_new_tokens=256,
+            max_new_tokens=512,
             do_sample=True
         )
 
         return outputs_script
     
-    def generate_image_prompts(self, script_json):
+    def generate_bing_search_term(self, script_text):
         """
-        Given a JSON dictionary (like the output from generate_script) or a raw script string,
-        create Bing-ready search terms for images that would fit each sentence of the script.
+        Given a string representing the script, create Bing-ready search terms 
+        for images that would fit each sentence of the script.
 
-        - `script_json` can be either a dict with the key "script" or just a string of the script.
-        - For each sentence in the script, produce one short search prompt.
-        - Return a single list of search prompts in strictly JSON array format, e.g.: ["search prompt 1", "search prompt 2"].
+        Returns a single string which should be a strictly valid JSON array
+        of search terms, e.g.: ["search prompt 1", "search prompt 2"].
         """
-        # If script_json is actually a dictionary, extract the script text
-        if isinstance(script_json, dict) and "script" in script_json:
-            script_text = script_json["script"]
-        else:
-            # Otherwise assume the input is just a string script
-            script_text = script_json
-
         pipe = self._create_pipeline()
 
         messages_prompts = [
@@ -191,31 +158,94 @@ class LLaMarizer:
                 "role": "system",
                 "content": (
                     "You are a creative social media content planner. You specialize in selecting relevant images "
-                    "to accompany short educational video reels on Instagram. You will receive a short script, "
-                    "where each sentence should correspond to a distinct imagery concept. "
-                    "Your task: for each sentence in the script, produce ONE Bing image search phrase. "
-                    "These search terms should be concise, direct, and capture the core idea or metaphor "
-                    "of each sentence, suitable for an Instagram educational reel. "
-                    "Finally, return a strictly valid JSON array of search terms, "
-                    "one array element per sentence. No extra commentary, no explanation—"
-                    "just the JSON array. It must start with '[' and end with ']', "
-                    "with a comma after each element except the last."
+                    "to accompany short educational video reels on Instagram. You will receive exactly one sentence of a reel script. "
+                    "Your task: for this sentence from the script, produce ONE Bing image search term to find a fitting image. "
+                    "This search term should be concise, direct, and capture the core idea or metaphor "
+                    "of each sentence, suitable for an Instagram educational reel."
+                    "It should help the viewer understand the concept mentioned in the sentence."
+                    "Return only the search term, in exactly the format that can be pasted into the Bing search bar."
+                    "No extra commentary, no explanation, just the Bing search term."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Script:\n{script_text}\n\n"
-                    "Generate the Bing image search prompts now."
+                    f"Sentence:\n{script_text}\n\n"
+                    "Generate the Bing image search term now."
                 ),
             },
         ]
 
         outputs_prompts = pipe(
             messages_prompts,
-            max_new_tokens=128,
+            max_new_tokens=512,
             do_sample=True
         )
 
-        return outputs_prompts
+        # The pipeline's default return is a list of dicts with the key "generated_text"
+        # e.g., [{"generated_text": "..."}].
+        # We only need the string from the first item in that list:
+        raw_response = outputs_prompts[0]["generated_text"][-1]["content"]
+
+        # Return just the single string
+        return raw_response
+    
+    def generate_multiple_bing_search_terms(self, sentences):
+        """
+        Takes a list of sentences, calls `generate_bing_search_term` on each,
+        and returns a list of strings containing the Bing search terms.
+        """
+        results = []
+        for sentence in sentences:
+            search_term = self.generate_bing_search_term(sentence)
+            results.append(search_term)
+        return results
+
+    def is_valid_format(self, response):
+        try:
+            parsed_output = json.loads(response)
+            return True
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+        return False
+
+    def generate_scripts_until_valid(self, transcript, retries=10, delay=2):
+        attempts = 0
+        while attempts < retries:
+            outputs_script = self.generate_script(transcript)
+            raw_response = outputs_script[0]["generated_text"]
+            
+            if self.is_valid_format(raw_response):
+                return raw_response
+            
+            print(f"Attempt {attempts + 1} failed, retrying...")
+            time.sleep(delay)
+            attempts += 1
+
+        raise ValueError("Failed to generate a valid script after multiple attempts")
+    
+    def process_script(self, script):
+        """
+        Takes a string input:
+        1) If there is a colon in the first sentence, remove everything up to and including that colon.
+        2) Split the remaining text into a list of sentences.
+        """
+        # First check for colon in the text before first period/question mark/exclamation
+        first_sentence_end = re.search(r'[.?!]', script)
+        if first_sentence_end:
+            first_part = script[:first_sentence_end.start()]
+            rest = script[first_sentence_end.start():]
+        else:
+            first_part = script
+            rest = ""
+            
+        # If first part contains colon, remove everything before it
+        if ':' in first_part:
+            _, after_colon = first_part.split(':', 1)
+            script = after_colon.strip() + rest
+            
+        # Split into sentences, keeping the punctuation
+        sentences = [sent.strip() for sent in re.findall(r'[^.!?]+[.!?]', script)]
+        
+        return sentences
 
